@@ -3,13 +3,11 @@
   "version": "5.4.7",
   "description": "Simple C++ wrapper for lua",
   "keywords": "lua, esp32",
-  "repository":
-{
+  "repository": {
     "type": "git",
     "url": "https://github.com/Fischer-Simon/Esp32Lua"
   },
-  "authors":
-  [
+  "authors": [
     {
       "name": "Simon Fischer"
     }
@@ -17,5 +15,12 @@
   "license": "MIT",
   "homepage": "https://github.com/Fischer-Simon/Esp32Lua/",
   "frameworks": "arduino",
-  "platforms": "espressif32"
+  "platforms": "espressif32",
+  "build": {
+    "srcFilter": [
+      "+<*>",
+      "-<lua/lua.c>",
+      "-<lua/luac.c>"
+    ]
+  }
 }
