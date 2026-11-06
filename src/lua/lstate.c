@@ -28,6 +28,35 @@
 #include "ltm.h"
 
 
+/*
+** Default 'luai_cstacklimit' (see LUAI_CSTACKRESERVE in llimits.h). On
+** ESP-IDF it is the lowest address of the running FreeRTOS task's stack;
+** before the scheduler starts (static constructors, say) there is no
+** running task and no limit is known. Elsewhere no limit is known.
+*/
+#if !defined(luai_cstacklimit)
+
+#if defined(ESP_PLATFORM)
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+static const char *l_taskstacklimit (void) {
+  TaskHandle_t task = xTaskGetCurrentTaskHandle();
+  return (task == NULL) ? NULL : (const char *)pxTaskGetStackStart(task);
+}
+
+#define luai_cstacklimit(L)	l_taskstacklimit()
+
+#else
+
+#define luai_cstacklimit(L)	NULL
+
+#endif
+
+#endif
+
+
 
 /*
 ** thread state + extra space
@@ -170,10 +199,59 @@ void luaE_checkcstack (lua_State *L) {
 }
 
 
+/*
+** Bytes of C stack left above 'luai_cstacklimit', measured at a local
+** of this function, or MAX_SIZE when the limit is not known (or the
+** running code is not on the stack it describes).
+*/
+size_t luaE_cstackleft (lua_State *L) {
+  const char *limit = luai_cstacklimit(L);
+  char here;
+  UNUSED(L);
+  if (limit == NULL || (L_P2I)&here < (L_P2I)limit)
+    return MAX_SIZE;
+  return cast_sizet((L_P2I)&here - (L_P2I)limit);
+}
+
+
+/*
+** Called wherever the count of C calls is checked (see LUAI_CSTACKRESERVE
+** in llimits.h). Running short of C stack is treated as reaching
+** LUAI_MAXCCALLS: the count is raised to the limit, so that the error is
+** raised, and its handler then runs, exactly as for the count. The raised
+** count is undone when the error unwinds ('luaD_rawrunprotected' restores
+** 'nCcalls').
+*/
+void luaE_checkcstackleft (lua_State *L) {
+  size_t left = luaE_cstackleft(L);
+  if (l_likely(left >= LUAI_CSTACKRESERVE + LUAI_CSTACKERRSPACE))
+    return;  /* the usual case */
+  if (left < LUAI_CSTACKRESERVE)
+    luaD_throw(L, LUA_ERRERR);  /* too little left to handle an error */
+  if (getCcalls(L) < LUAI_MAXCCALLS) {  /* not handling an overflow yet? */
+    L->nCcalls += LUAI_MAXCCALLS - getCcalls(L);
+    luaE_checkcstack(L);  /* raises "C stack overflow" */
+  }
+}
+
+
 LUAI_FUNC void luaE_incCstack (lua_State *L) {
   L->nCcalls++;
   if (l_unlikely(getCcalls(L) >= LUAI_MAXCCALLS))
     luaE_checkcstack(L);
+  luaE_checkcstackleft(L);
+}
+
+
+/*
+** For C code that recurses on its own, without calling back into Lua (a
+** pattern matcher, a serializer): raises "C stack overflow" where the core
+** would, so that such recursion is bounded by the same C-stack limit.
+*/
+LUA_API void lua_checkcstack (lua_State *L) {
+  lua_lock(L);
+  luaE_checkcstackleft(L);
+  lua_unlock(L);
 }
 
 

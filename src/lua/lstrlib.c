@@ -618,6 +618,8 @@ static const char *match_capture (MatchState *ms, const char *s, int l) {
 static const char *match (MatchState *ms, const char *s, const char *p) {
   if (l_unlikely(ms->matchdepth-- == 0))
     luaL_error(ms->L, "pattern too complex");
+  if (ms->matchdepth < MAXCCALLS - 1)  /* a recursive call? */
+    lua_checkcstack(ms->L);  /* depth is bounded; C stack may run out first */
   init: /* using goto to optimize tail recursion */
   if (l_unlikely(--ms->hookbudget == 0))  /* one step per pattern item */
     callhook(ms);

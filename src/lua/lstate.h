@@ -113,6 +113,10 @@ typedef struct CallInfo CallInfo;
 /* Decrement the number of non-yieldable calls */
 #define decnny(L)	((L)->nCcalls -= 0x10000)
 
+/* true when the C stack is nearly full (see LUAI_CSTACKRESERVE) */
+#define luaE_cstackshort(L)  \
+	(luaE_cstackleft(L) < LUAI_CSTACKRESERVE + LUAI_CSTACKERRSPACE)
+
 /* Non-yieldable call increment */
 #define nyci	(0x10000 | 1)
 
@@ -399,6 +403,8 @@ LUAI_FUNC CallInfo *luaE_extendCI (lua_State *L);
 LUAI_FUNC void luaE_shrinkCI (lua_State *L);
 LUAI_FUNC void luaE_checkcstack (lua_State *L);
 LUAI_FUNC void luaE_incCstack (lua_State *L);
+LUAI_FUNC size_t luaE_cstackleft (lua_State *L);
+LUAI_FUNC void luaE_checkcstackleft (lua_State *L);
 LUAI_FUNC void luaE_warning (lua_State *L, const char *msg, int tocont);
 LUAI_FUNC void luaE_warnerror (lua_State *L, const char *where);
 LUAI_FUNC int luaE_resetthread (lua_State *L, int status);

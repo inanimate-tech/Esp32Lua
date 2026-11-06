@@ -257,6 +257,42 @@ typedef l_uint32 Instruction;
 
 
 /*
+** C-stack limit. LUAI_MAXCCALLS bounds how deep recursion through C
+** goes, not how much C stack it takes: one level costs from about a
+** hundred bytes to more than a kilobyte, depending on the C functions in
+** it, so a small stack (a FreeRTOS task's, say) can run out long before
+** the count does. Where 'luai_cstacklimit(L)' gives the lowest usable
+** address of the C stack the running code is on (the stack is taken to
+** grow downwards), the places that count C calls also measure the stack
+** left above it. With fewer than LUAI_CSTACKRESERVE + LUAI_CSTACKERRSPACE
+** bytes left they raise "C stack overflow", as LUAI_MAXCCALLS does; while
+** that error is being handled, its message handler may use the
+** LUAI_CSTACKERRSPACE bytes, and below LUAI_CSTACKRESERVE the core throws
+** LUA_ERRERR without calling a handler at all.
+**
+** LUAI_CSTACKRESERVE must hold the deepest C call a script can make that
+** does not call back into Lua (a library function and everything it
+** calls), plus an interrupt or context-switch frame where those use the
+** same stack. The default suits the standard library on a 32-bit
+** microcontroller ('string.format' through printf is about 1.6 KB there);
+** an embedder whose own functions go deeper must raise it.
+** LUAI_CSTACKERRSPACE must hold the error-raising path up to the call of
+** the message handler; the handler's own C calls use the reserve.
+**
+** 'luai_cstacklimit' gives NULL when the limit is not known, and then only
+** LUAI_MAXCCALLS applies. The default knows the running task's stack on
+** ESP-IDF (see lstate.c); an embedder can define it for another platform.
+*/
+#if !defined(LUAI_CSTACKRESERVE)
+#define LUAI_CSTACKRESERVE	3072
+#endif
+
+#if !defined(LUAI_CSTACKERRSPACE)
+#define LUAI_CSTACKERRSPACE	1024
+#endif
+
+
+/*
 ** macros that are executed whenever program enters the Lua core
 ** ('lua_lock') and leaves the core ('lua_unlock')
 */
