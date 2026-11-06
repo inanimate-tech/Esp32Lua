@@ -1231,6 +1231,28 @@ LUA_API int lua_gc (lua_State *L, int what, ...) {
 
 
 /*
+** hooks
+*/
+
+
+/*
+** Deliver a count event from inside a C function that is doing a long
+** piece of work without running Lua code, where the interpreter's own
+** instruction counting cannot reach. 'hook' and 'hookmask' are volatile,
+** so a hook installed asynchronously (e.g. from a timer) is seen here;
+** 'luaD_hook' re-reads 'hook' and checks 'allowhook' itself.
+*/
+LUA_API void lua_checkhook (lua_State *L) {
+  if (l_unlikely(L->hookmask & LUA_MASKCOUNT)) {
+    lua_lock(L);
+    luaD_hook(L, LUA_HOOKCOUNT, -1, 0, 0);
+    lua_unlock(L);
+  }
+}
+
+
+
+/*
 ** miscellaneous functions
 */
 

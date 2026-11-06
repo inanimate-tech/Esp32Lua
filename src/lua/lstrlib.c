@@ -152,8 +152,8 @@ static int str_rep (lua_State *L) {
   const char *s = luaL_checklstring(L, 1, &l);
   lua_Integer n = luaL_checkinteger(L, 2);
   const char *sep = luaL_optlstring(L, 3, "", &lsep);
-  if (n <= 0)
-    lua_pushliteral(L, "");
+  if (n <= 0 || (l | lsep) == 0)  /* nothing to repeat? */
+    lua_pushliteral(L, "");  /* (avoids looping 'n' times doing nothing) */
   else if (l_unlikely(l + lsep < l || l + lsep > MAXSIZE / n))
     return luaL_error(L, "resulting string too large");
   else {
@@ -361,6 +361,7 @@ typedef struct MatchState {
   const char *p_end;  /* end ('\0') of pattern */
   lua_State *L;
   int matchdepth;  /* control for recursive depth (to avoid C stack overflow) */
+  int hookbudget;  /* steps left before the next call to 'lua_checkhook' */
   unsigned char level;  /* total number of captures (finished or unfinished) */
   struct {
     const char *init;
@@ -377,6 +378,39 @@ static const char *match (MatchState *ms, const char *s, const char *p);
 #if !defined(MAXCCALLS)
 #define MAXCCALLS	200
 #endif
+
+
+/*
+** Matching steps between calls to 'lua_checkhook'. Backtracking can make
+** a match take time exponential in the length of the pattern while using
+** almost no memory, so the matcher cannot rely on the interpreter's own
+** instruction count to let a count hook (e.g. a time limit) interrupt it.
+** A step is one pattern item tried, or one subject character scanned.
+*/
+#if !defined(L_MATCHHOOKSTEPS)
+#define L_MATCHHOOKSTEPS	4096
+#endif
+
+
+/*
+** Refill the step budget and call the count hook. The hook may raise an
+** error, which leaves the match.
+*/
+static void callhook (MatchState *ms) {
+  ms->hookbudget = L_MATCHHOOKSTEPS;
+  lua_checkhook(ms->L);
+}
+
+
+/*
+** Charge 'n' steps (n >= 0) to the match.
+*/
+static void chargesteps (MatchState *ms, ptrdiff_t n) {
+  if (l_likely(n < ms->hookbudget))
+    ms->hookbudget -= (int)n;
+  else
+    callhook(ms);
+}
 
 
 #define L_ESC		'%'
@@ -489,15 +523,20 @@ static const char *matchbalance (MatchState *ms, const char *s,
     luaL_error(ms->L, "malformed pattern (missing arguments to '%%b')");
   if (*s != *p) return NULL;
   else {
+    const char *init = s;
     int b = *p;
     int e = *(p+1);
     int cont = 1;
     while (++s < ms->src_end) {
       if (*s == e) {
-        if (--cont == 0) return s+1;
+        if (--cont == 0) {
+          chargesteps(ms, s - init);
+          return s+1;
+        }
       }
       else if (*s == b) cont++;
     }
+    chargesteps(ms, s - init);
   }
   return NULL;  /* string ends out of balance */
 }
@@ -508,6 +547,7 @@ static const char *max_expand (MatchState *ms, const char *s,
   ptrdiff_t i = 0;  /* counts maximum expand for item */
   while (singlematch(ms, s + i, p, ep))
     i++;
+  chargesteps(ms, i);
   /* keeps trying to match with the maximum repetitions */
   while (i>=0) {
     const char *res = match(ms, (s+i), ep+1);
@@ -560,8 +600,10 @@ static const char *match_capture (MatchState *ms, const char *s, int l) {
   size_t len;
   l = check_capture(ms, l);
   len = ms->capture[l].len;
-  if ((size_t)(ms->src_end-s) >= len &&
-      memcmp(ms->capture[l].init, s, len) == 0)
+  if ((size_t)(ms->src_end-s) < len)  /* (also rejects a position) */
+    return NULL;
+  chargesteps(ms, (ptrdiff_t)len);
+  if (memcmp(ms->capture[l].init, s, len) == 0)
     return s+len;
   else return NULL;
 }
@@ -571,6 +613,8 @@ static const char *match (MatchState *ms, const char *s, const char *p) {
   if (l_unlikely(ms->matchdepth-- == 0))
     luaL_error(ms->L, "pattern too complex");
   init: /* using goto to optimize tail recursion */
+  if (l_unlikely(--ms->hookbudget == 0))  /* one step per pattern item */
+    callhook(ms);
   if (p != ms->p_end) {  /* end of pattern? */
     switch (*p) {
       case '(': {  /* start capture */
@@ -670,12 +714,18 @@ static const char *match (MatchState *ms, const char *s, const char *p) {
 
 
 
-static const char *lmemfind (const char *s1, size_t l1,
+/*
+** Each candidate position costs up to 'l2' bytes of comparison, so a
+** search can take time proportional to 'l1 * l2'; it calls the count hook
+** about every L_MATCHHOOKSTEPS bytes compared.
+*/
+static const char *lmemfind (lua_State *L, const char *s1, size_t l1,
                                const char *s2, size_t l2) {
   if (l2 == 0) return s1;  /* empty strings are everywhere */
   else if (l2 > l1) return NULL;  /* avoids a negative 'l1' */
   else {
     const char *init;  /* to search for a '*s2' inside 's1' */
+    size_t budget = L_MATCHHOOKSTEPS;  /* bytes left before the next check */
     l2--;  /* 1st char will be checked by 'memchr' */
     l1 = l1-l2;  /* 's2' cannot be found after that */
     while (l1 > 0 && (init = (const char *)memchr(s1, *s2, l1)) != NULL) {
@@ -683,6 +733,12 @@ static const char *lmemfind (const char *s1, size_t l1,
       if (memcmp(init, s2+1, l2) == 0)
         return init-1;
       else {  /* correct 'l1' and 's1' to try again */
+        if (l2 < budget)
+          budget -= l2;
+        else {
+          budget = L_MATCHHOOKSTEPS;
+          lua_checkhook(L);
+        }
         l1 -= init-s1;
         s1 = init;
       }
@@ -758,6 +814,7 @@ static void prepstate (MatchState *ms, lua_State *L,
                        const char *s, size_t ls, const char *p, size_t lp) {
   ms->L = L;
   ms->matchdepth = MAXCCALLS;
+  ms->hookbudget = L_MATCHHOOKSTEPS;
   ms->src_init = s;
   ms->src_end = s + ls;
   ms->p_end = p + lp;
@@ -782,7 +839,7 @@ static int str_find_aux (lua_State *L, int find) {
   /* explicit request or no special characters? */
   if (find && (lua_toboolean(L, 4) || nospecials(p, lp))) {
     /* do a plain search */
-    const char *s2 = lmemfind(s + init, ls - init, p, lp);
+    const char *s2 = lmemfind(L, s + init, ls - init, p, lp);
     if (s2) {
       lua_pushinteger(L, (s2 - s) + 1);
       lua_pushinteger(L, (s2 - s) + lp);

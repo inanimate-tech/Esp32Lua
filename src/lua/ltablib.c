@@ -380,6 +380,7 @@ static void auxsort (lua_State *L, IdxT lo, IdxT up,
     set2(L, p, up - 1);  /* swap Pivot (a[p]) with a[up - 1] */
     p = partition(L, lo, up);
     /* a[lo .. p - 1] <= a[p] == P <= a[p + 1 .. up] */
+    lua_checkhook(L);  /* let a count hook interrupt a long sort */
     if (p - lo < up - p) {  /* lower interval is smaller? */
       auxsort(L, lo, p - 1, rnd);  /* call recursively for lower interval */
       n = p - lo;  /* size of smaller interval */
