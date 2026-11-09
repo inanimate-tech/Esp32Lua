@@ -2,6 +2,9 @@
 
  #include <mutex>
 #include <Print.h>
+#include <cassert>
+#include <cstdint>
+#include <string>
 #include <utility>
 #include <vector>
 
