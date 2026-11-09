@@ -1005,6 +1005,8 @@ LUA_API void lua_callk (lua_State *L, int nargs, int nresults,
                         lua_KContext ctx, lua_KFunction k) {
   StkId func;
   lua_lock(L);
+  if (getCcalls(L) == 0)  /* entering Lua from outside it? */
+    luaE_setcstackfloor(L);
   api_check(L, k == NULL || !isLua(L->ci),
     "cannot use continuations inside hooks");
   api_checknelems(L, nargs+1);
@@ -1046,6 +1048,8 @@ LUA_API int lua_pcallk (lua_State *L, int nargs, int nresults, int errfunc,
   int status;
   ptrdiff_t func;
   lua_lock(L);
+  if (getCcalls(L) == 0)  /* entering Lua from outside it? */
+    luaE_setcstackfloor(L);
   api_check(L, k == NULL || !isLua(L->ci),
     "cannot use continuations inside hooks");
   api_checknelems(L, nargs+1);
@@ -1089,6 +1093,8 @@ LUA_API int lua_load (lua_State *L, lua_Reader reader, void *data,
   ZIO z;
   int status;
   lua_lock(L);
+  if (getCcalls(L) == 0)  /* entering Lua from outside it? */
+    luaE_setcstackfloor(L);
   if (!chunkname) chunkname = "?";
   luaZ_init(L, &z, reader, data);
   status = luaD_protectedparser(L, &z, chunkname, mode);

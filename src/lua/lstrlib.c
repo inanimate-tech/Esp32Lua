@@ -16,6 +16,7 @@
 #include <locale.h>
 #include <math.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -361,6 +362,7 @@ typedef struct MatchState {
   const char *p_end;  /* end ('\0') of pattern */
   lua_State *L;
   int matchdepth;  /* control for recursive depth (to avoid C stack overflow) */
+  const char *cstackfloor;  /* C stack below this needs 'lua_checkcstack' */
   int hookbudget;  /* steps left before the next call to 'lua_checkhook' */
   unsigned char level;  /* total number of captures (finished or unfinished) */
   struct {
@@ -618,8 +620,11 @@ static const char *match_capture (MatchState *ms, const char *s, int l) {
 static const char *match (MatchState *ms, const char *s, const char *p) {
   if (l_unlikely(ms->matchdepth-- == 0))
     luaL_error(ms->L, "pattern too complex");
-  if (ms->matchdepth < MAXCCALLS - 1)  /* a recursive call? */
-    lua_checkcstack(ms->L);  /* depth is bounded; C stack may run out first */
+  {  /* depth is bounded, but the C stack may run out first */
+    char here;
+    if (l_unlikely((uintptr_t)&here < (uintptr_t)ms->cstackfloor))
+      lua_checkcstack(ms->L);  /* raises "C stack overflow" */
+  }
   init: /* using goto to optimize tail recursion */
   if (l_unlikely(--ms->hookbudget == 0))  /* one step per pattern item */
     callhook(ms);
@@ -822,6 +827,7 @@ static void prepstate (MatchState *ms, lua_State *L,
                        const char *s, size_t ls, const char *p, size_t lp) {
   ms->L = L;
   ms->matchdepth = MAXCCALLS;
+  ms->cstackfloor = (const char *)lua_cstackfloor(L);
   ms->hookbudget = L_MATCHHOOKSTEPS;
   ms->src_init = s;
   ms->src_end = s + ls;

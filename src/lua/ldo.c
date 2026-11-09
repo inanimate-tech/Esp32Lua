@@ -847,6 +847,8 @@ LUA_API int lua_resume (lua_State *L, lua_State *from, int nargs,
   else if (L->status != LUA_YIELD)  /* ended with errors? */
     return resume_error(L, "cannot resume dead coroutine", nargs);
   L->nCcalls = (from) ? getCcalls(from) : 0;
+  if (getCcalls(L) == 0)  /* resumed from outside Lua? */
+    luaE_setcstackfloor(L);
   if (getCcalls(L) >= LUAI_MAXCCALLS || luaE_cstackshort(L))
     return resume_error(L, "C stack overflow", nargs);
   L->nCcalls++;

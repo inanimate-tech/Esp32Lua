@@ -223,7 +223,9 @@ size_t luaE_cstackleft (lua_State *L) {
 ** 'nCcalls').
 */
 void luaE_checkcstackleft (lua_State *L) {
-  size_t left = luaE_cstackleft(L);
+  size_t left;
+  luaE_setcstackfloor(L);  /* the cached floor may be another stack's */
+  left = luaE_cstackleft(L);
   if (l_likely(left >= LUAI_CSTACKRESERVE + LUAI_CSTACKERRSPACE))
     return;  /* the usual case */
   if (left < LUAI_CSTACKRESERVE)
@@ -235,11 +237,31 @@ void luaE_checkcstackleft (lua_State *L) {
 }
 
 
+/*
+** Cache the floor of the C stack the running code is on: the address
+** below which fewer than LUAI_CSTACKRESERVE + LUAI_CSTACKERRSPACE bytes
+** are left. Finding the stack can cost more than the call it guards (two
+** calls into the RTOS on ESP-IDF), so the places that count C calls only
+** compare against this, and it is refreshed where C code enters Lua from
+** outside it (a task, say, may enter on a stack of its own): lua_callk,
+** lua_pcallk and lua_load at the outermost level, and lua_resume. A floor
+** left by another stack never raises an error by itself, since
+** 'luaE_checkcstackleft' refreshes it first; at worst a check is missed
+** (a finalizer run by a collection entered from another stack, say).
+*/
+void luaE_setcstackfloor (lua_State *L) {
+  const char *limit = luai_cstacklimit(L);
+  G(L)->cstackfloor = (limit == NULL) ? NULL
+                      : limit + LUAI_CSTACKRESERVE + LUAI_CSTACKERRSPACE;
+}
+
+
 LUAI_FUNC void luaE_incCstack (lua_State *L) {
   L->nCcalls++;
   if (l_unlikely(getCcalls(L) >= LUAI_MAXCCALLS))
     luaE_checkcstack(L);
-  luaE_checkcstackleft(L);
+  if (l_unlikely(luaE_cstackshort(L)))
+    luaE_checkcstackleft(L);
 }
 
 
@@ -252,6 +274,19 @@ LUA_API void lua_checkcstack (lua_State *L) {
   lua_lock(L);
   luaE_checkcstackleft(L);
   lua_unlock(L);
+}
+
+
+/*
+** The C-stack address below which 'lua_checkcstack' should be called, or
+** NULL when no limit is known: the floor cached when C code last entered
+** Lua (see 'luaE_setcstackfloor'). A C function that recurses many times
+** reads it once and compares the address of a local against it, calling
+** 'lua_checkcstack' (which measures afresh) only below it, instead of
+** paying for the full check at every level.
+*/
+LUA_API const void *lua_cstackfloor (lua_State *L) {
+  return G(L)->cstackfloor;
 }
 
 
@@ -474,6 +509,7 @@ LUA_API lua_State *lua_newstate (lua_Alloc f, void *ud) {
   g->twups = NULL;
   g->totalbytes = sizeof(LG);
   g->GCdebt = 0;
+  g->cstackfloor = NULL;
   g->lastatomic = 0;
   setivalue(&g->nilvalue, 0);  /* to signal that state is not yet built */
   setgcparam(g->gcpause, LUAI_GCPAUSE);

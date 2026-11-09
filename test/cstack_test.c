@@ -44,6 +44,25 @@ static int reenter (lua_State *L) {
   return lua_gettop(L);
 }
 
+/*
+** otherstack(): leaves the interpreter holding the C-stack floor of a
+** nearly full stack, as entering Lua from another task would, then gives
+** this stack its room back without entering Lua again, so the floor is
+** stale and above the running code.
+*/
+static int otherstack (lua_State *L) {
+  char here;
+  const char *roomy = g_limit;
+  lua_State *co = lua_newthread(L);
+  int nres;
+  g_limit = (const char *)((uintptr_t)&here - 64);  /* nearly full */
+  lua_pushcfunction(co, reenter);
+  (void)lua_resume(co, NULL, 0, &nres);  /* refreshes the floor; refused */
+  g_limit = roomy;
+  lua_pop(L, 1);
+  return 0;
+}
+
 static void check (int ok, const char *what, const char *detail) {
   printf("%s %s%s%.200s\n", ok ? "ok  " : "FAIL", what, detail ? ": " : "",
          detail ? detail : "");
@@ -117,6 +136,7 @@ int main (void) {
   lua_State *L = luaL_newstate();
   luaL_openlibs(L);
   lua_register(L, "reenter", reenter);
+  lua_register(L, "otherstack", otherstack);
 
   setbudget(48 * 1024);
   expect_error(L, "recursion through C stops with a clean error",
@@ -135,6 +155,14 @@ int main (void) {
 
   setbudget(48 * 1024);
   expect_ok(L, "shallow recursion through C is unaffected",
+            "local function down(n) "
+            "  if n == 20 then return true end "
+            "  return reenter(down, n + 1) end "
+            "return pcall(down, 0)");
+
+  setbudget(48 * 1024);
+  expect_ok(L, "a floor cached for another stack raises no error by itself",
+            "otherstack() "
             "local function down(n) "
             "  if n == 20 then return true end "
             "  return reenter(down, n + 1) end "
