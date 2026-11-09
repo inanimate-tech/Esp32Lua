@@ -385,7 +385,8 @@ static const char *match (MatchState *ms, const char *s, const char *p);
 ** a match take time exponential in the length of the pattern while using
 ** almost no memory, so the matcher cannot rely on the interpreter's own
 ** instruction count to let a count hook (e.g. a time limit) interrupt it.
-** A step is one pattern item tried, or one subject character scanned.
+** A step is one pattern item tried, one subject character scanned, or one
+** byte of a character set read.
 */
 #if !defined(L_MATCHHOOKSTEPS)
 #define L_MATCHHOOKSTEPS	4096
@@ -442,6 +443,7 @@ static const char *classend (MatchState *ms, const char *p) {
       return p+1;
     }
     case '[': {
+      const char *set = p;
       if (*p == '^') p++;
       do {  /* look for a ']' */
         if (l_unlikely(p == ms->p_end))
@@ -449,6 +451,7 @@ static const char *classend (MatchState *ms, const char *p) {
         if (*(p++) == L_ESC && p < ms->p_end)
           p++;  /* skip escapes (e.g. '%]') */
       } while (*p != ']');
+      chargesteps(ms, p - set);  /* a set's length is the pattern's to choose */
       return p+1;
     }
     default: {
@@ -510,7 +513,10 @@ static int singlematch (MatchState *ms, const char *s, const char *p,
     switch (*p) {
       case '.': return 1;  /* matches any char */
       case L_ESC: return match_class(c, uchar(*(p+1)));
-      case '[': return matchbracketclass(c, p, ep-1);
+      case '[': {  /* costs up to the set's length, for each character */
+        chargesteps(ms, ep - p);
+        return matchbracketclass(c, p, ep-1);
+      }
       default:  return (uchar(*p) == c);
     }
   }

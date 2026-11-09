@@ -90,6 +90,20 @@ int main (void) {
   expect_delivery(L, "string.find, back-references",
       "assert(not string.find(('a'):rep(400), '(a*)%1b'))");
 
+  /* Each character tested against a set reads up to the whole set, and a
+     greedy item tests them all before it charges anything ('singlematch').
+     One scan of the subject is enough to show it: no pattern item is tried
+     after the first, so the only steps are the set's. */
+  expect_delivery(L, "string.find, one long set",
+      "local set = '[' .. ('a'):rep(4096) .. 'b]*'"
+      " assert(string.find(('b'):rep(4096), set))");
+
+  /* Parsing a set reads it too, even at the end of the subject, where
+     testing a character does not ('classend'). */
+  expect_delivery(L, "string.find, long sets at the end of the subject",
+      "local set = ('[' .. ('a'):rep(4096) .. ']?'):rep(4)"
+      " assert(string.find('', set))");
+
   /* gsub and gmatch share the matcher. */
   expect_delivery(L, "string.gsub, backtracking",
       "local s, n = string.gsub(('a'):rep(60), ('(.-)'):rep(3) .. 'b', '')"
