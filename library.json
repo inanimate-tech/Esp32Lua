@@ -1,19 +1,23 @@
 {
   "name": "Esp32Lua",
-  "version": "5.4.7",
-  "description": "Simple C++ wrapper for lua",
+  "version": "1.0.0",
+  "description": "Lua 5.4.7 for ESP32 with a simple C++ wrapper. Inanimate's maintained fork of Simon Fischer's Esp32Lua.",
   "keywords": "lua, esp32",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Fischer-Simon/Esp32Lua"
+    "url": "https://github.com/inanimate-tech/Esp32Lua"
   },
   "authors": [
     {
       "name": "Simon Fischer"
+    },
+    {
+      "name": "Inanimate",
+      "maintainer": true
     }
   ],
   "license": "MIT",
-  "homepage": "https://github.com/Fischer-Simon/Esp32Lua/",
+  "homepage": "https://github.com/inanimate-tech/Esp32Lua",
   "frameworks": "arduino",
   "platforms": "espressif32",
   "build": {
@@ -21,6 +25,14 @@
       "+<*>",
       "-<lua/lua.c>",
       "-<lua/luac.c>"
+    ]
+  },
+  "export": {
+    "include": [
+      "include/**/*",
+      "src/**/*",
+      "library.json",
+      "LICENSE"
     ]
   }
 }
