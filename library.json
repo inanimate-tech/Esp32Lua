@@ -1,6 +1,6 @@
 {
   "name": "Esp32Lua",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Lua 5.4.7 for ESP32 with a simple C++ wrapper. Inanimate's maintained fork of Simon Fischer's Esp32Lua.",
   "keywords": "lua, esp32",
   "repository": {
