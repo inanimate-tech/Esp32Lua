@@ -169,6 +169,36 @@ int main (void) {
             "return pcall(down, 0)");
 
   setbudget(48 * 1024);
+  expect_ok(L, "nor does it refuse to resume a coroutine",
+            "otherstack() "
+            "return coroutine.wrap(function () return true end)()");
+
+  /* A finalizer enters Lua through no call of the API's: the collector
+     calls it. The floor here is one cached for a much deeper stack. */
+  lua_gc(L, LUA_GCSTOP);
+  setbudget(8 * 1024 * 1024);
+  expect_ok(L, "(an object with a recursive finalizer)",
+            RECURSE
+            "setmetatable({}, {__gc = function () down(0) end}) "
+            "return true");
+  setbudget(48 * 1024);
+  lua_gc(L, LUA_GCCOLLECT);
+  lua_gc(L, LUA_GCRESTART);
+  check(g_calls > 0, "a finalizer run from outside Lua recurses", NULL);
+  check_reserve_kept("it stops on the C stack, outside the reserve");
+
+  /* An iterator outlives the entry it was made in, and its matcher must
+     use the floor of the stack it runs on, not of the one it was made on. */
+  setbudget(8 * 1024 * 1024);
+  expect_ok(L, "(a gmatch iterator made on a deeper stack)",
+            "iterator = string.gmatch(string.rep('a', 190), "
+            "                         string.rep('a?', 190)) "
+            "return true");
+  setbudget(12 * 1024);
+  expect_limited(L, "a gmatch iterator stops on the stack it runs on",
+                 "return pcall(iterator)", "C stack overflow");
+
+  setbudget(48 * 1024);
   expect_error(L, "resuming coroutines stops with a clean error",
                "local function down(n) return coroutine.wrap(down)(n + 1) end "
                "return pcall(down, 0)",

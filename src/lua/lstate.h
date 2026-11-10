@@ -116,7 +116,8 @@ typedef struct CallInfo CallInfo;
 /*
 ** True when the C stack may be nearly full (see LUAI_CSTACKRESERVE): the
 ** running code is below the floor 'luaE_setcstackfloor' last cached. Only
-** a hint; 'luaE_checkcstackleft' measures again before raising anything.
+** a hint; 'luaE_checkcstackleft' and 'luaE_cstackfull' measure again
+** before anything is raised or refused.
 */
 #define luaE_cstackshort(L)	luaE_belowfloor(G(L)->cstackfloor)
 
@@ -414,6 +415,7 @@ LUAI_FUNC void luaE_checkcstack (lua_State *L);
 LUAI_FUNC void luaE_incCstack (lua_State *L);
 LUAI_FUNC size_t luaE_cstackleft (lua_State *L);
 LUAI_FUNC void luaE_checkcstackleft (lua_State *L);
+LUAI_FUNC int luaE_cstackfull (lua_State *L);
 LUAI_FUNC void luaE_setcstackfloor (lua_State *L);
 LUAI_FUNC void luaE_warning (lua_State *L, const char *msg, int tocont);
 LUAI_FUNC void luaE_warnerror (lua_State *L, const char *where);

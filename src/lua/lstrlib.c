@@ -910,6 +910,7 @@ static int gmatch_aux (lua_State *L) {
   GMatchState *gm = (GMatchState *)lua_touserdata(L, lua_upvalueindex(3));
   const char *src;
   gm->ms.L = L;
+  gm->ms.cstackfloor = (const char *)lua_cstackfloor(L);  /* this call's */
   for (src = gm->src; src <= gm->ms.src_end; src++) {
     const char *e;
     reprepstate(&gm->ms);

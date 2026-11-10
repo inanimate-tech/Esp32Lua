@@ -238,16 +238,29 @@ void luaE_checkcstackleft (lua_State *L) {
 
 
 /*
+** True when too little C stack is left to enter Lua, measured afresh
+** (for a caller that refuses instead of raising an error).
+*/
+int luaE_cstackfull (lua_State *L) {
+  luaE_setcstackfloor(L);  /* the cached floor may be another stack's */
+  return luaE_cstackleft(L) < LUAI_CSTACKRESERVE + LUAI_CSTACKERRSPACE;
+}
+
+
+/*
 ** Cache the floor of the C stack the running code is on: the address
 ** below which fewer than LUAI_CSTACKRESERVE + LUAI_CSTACKERRSPACE bytes
 ** are left. Finding the stack can cost more than the call it guards (two
 ** calls into the RTOS on ESP-IDF), so the places that count C calls only
 ** compare against this, and it is refreshed where C code enters Lua from
-** outside it (a task, say, may enter on a stack of its own): lua_callk,
-** lua_pcallk and lua_load at the outermost level, and lua_resume. A floor
-** left by another stack never raises an error by itself, since
-** 'luaE_checkcstackleft' refreshes it first; at worst a check is missed
-** (a finalizer run by a collection entered from another stack, say).
+** outside it (a task, say, may enter on a stack of its own), which is
+** where the count of C calls leaves zero: in 'ccall', which every call
+** from C goes through (lua_callk and lua_pcallk, and the metamethods and
+** finalizers that other API functions run), in lua_load and in
+** lua_resume. A floor left by another stack never raises or refuses
+** anything by itself, since 'luaE_checkcstackleft' and 'luaE_cstackfull'
+** refresh it first; at worst a check is missed, where the running code
+** changes stacks without leaving Lua.
 */
 void luaE_setcstackfloor (lua_State *L) {
   const char *limit = luai_cstacklimit(L);
@@ -281,7 +294,8 @@ LUA_API void lua_checkcstack (lua_State *L) {
 ** The C-stack address below which 'lua_checkcstack' should be called, or
 ** NULL when no limit is known: the floor cached when C code last entered
 ** Lua (see 'luaE_setcstackfloor'). A C function that recurses many times
-** reads it once and compares the address of a local against it, calling
+** reads it once each time it is called and compares the address of a
+** local against it, calling
 ** 'lua_checkcstack' (which measures afresh) only below it, instead of
 ** paying for the full check at every level.
 */
