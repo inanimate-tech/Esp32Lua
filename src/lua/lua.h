@@ -469,7 +469,9 @@ LUA_API void  (lua_upvaluejoin) (lua_State *L, int fidx1, int n1,
 ** A C function that may run for a long time calls 'lua_checkhook' now and
 ** then, so that a count hook (e.g. one enforcing an execution time limit)
 ** is not starved until the function returns. It delivers a LUA_HOOKCOUNT
-** event at once if a count hook is set, whatever the hook's count.
+** event at once if a count hook is set, whatever the hook's count. The
+** hook may raise an error, which leaves the C function, but cannot yield:
+** 'lua_isyieldable' is false while it runs.
 */
 LUA_API void (lua_checkhook) (lua_State *L);
 

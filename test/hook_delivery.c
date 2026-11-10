@@ -33,6 +33,18 @@ static void count_hook (lua_State *L, lua_Debug *ar) {
     luaL_error(L, "interrupted by hook");
 }
 
+/* A hook that yields wherever the interpreter says it may. */
+static int yields;
+
+static void yielding_hook (lua_State *L, lua_Debug *ar) {
+  (void)ar;
+  deliveries++;
+  if (lua_isyieldable(L)) {
+    yields++;
+    lua_yield(L, 0);
+  }
+}
+
 static int failures;
 
 static void check (int ok, const char *what) {
@@ -46,6 +58,20 @@ static int run (lua_State *L, const char *code, int raise) {
   deliveries = 0;
   raise_after = raise;
   lua_sethook(L, count_hook, LUA_MASKCOUNT, NEVER_BY_INSTRUCTIONS);
+  status = luaL_dostring(L, code);
+  lua_sethook(L, NULL, 0, 0);
+  return status;
+}
+
+/*
+** Run 'code' with the yielding hook armed on every coroutine it creates
+** (a new coroutine inherits the hook of the thread that creates it).
+*/
+static int run_yielding (lua_State *L, const char *code) {
+  int status;
+  deliveries = 0;
+  yields = 0;
+  lua_sethook(L, yielding_hook, LUA_MASKCOUNT, NEVER_BY_INSTRUCTIONS);
   status = luaL_dostring(L, code);
   lua_sethook(L, NULL, 0, 0);
   return status;
@@ -150,6 +176,21 @@ int main (void) {
     lua_settop(L, 0);
     check(luaL_dostring(L, "assert(('abc'):find('b') == 2)") == LUA_OK,
           "... and the state is usable afterwards");
+  }
+
+  /* A count hook may yield between Lua instructions, but a C function
+     has nowhere to resume: delivered inside one, the hook is not
+     yieldable, so a hook that asks first leaves the call to finish. */
+  {
+    int status = run_yielding(L,
+        "local co = coroutine.wrap(function ()"
+        "  return string.find(('a'):rep(300) .. 'c' .. 'aab', 'a*a*b') end)"
+        " local from, to = co()"
+        " assert(from == 302 and to == 304, 'the search was cut short')");
+    if (status != LUA_OK) printf("     error: %s\n", lua_tostring(L, -1));
+    check(status == LUA_OK && deliveries > 0 && yields == 0,
+          "a hook delivered inside string.find cannot yield");
+    lua_settop(L, 0);
   }
 
   /* string.rep of nothing returns at once, whatever the count. */
