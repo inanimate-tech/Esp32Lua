@@ -1089,6 +1089,8 @@ LUA_API int lua_load (lua_State *L, lua_Reader reader, void *data,
   ZIO z;
   int status;
   lua_lock(L);
+  if (getCcalls(L) == 0)  /* entering Lua from outside it? */
+    luaE_setcstackfloor(L);
   if (!chunkname) chunkname = "?";
   luaZ_init(L, &z, reader, data);
   status = luaD_protectedparser(L, &z, chunkname, mode);
@@ -1226,6 +1228,36 @@ LUA_API int lua_gc (lua_State *L, int what, ...) {
   va_end(argp);
   lua_unlock(L);
   return res;
+}
+
+
+
+/*
+** hooks
+*/
+
+
+/*
+** Deliver a count event from inside a C function that is doing a long
+** piece of work without running Lua code, where the interpreter's own
+** instruction counting cannot reach. 'hook' and 'hookmask' are volatile,
+** so a hook installed asynchronously (e.g. from a timer) is seen here;
+** 'luaD_hook' re-reads 'hook' and checks 'allowhook' itself.
+**
+** The hook runs as non-yieldable. A count hook may yield where it
+** interrupts Lua code, which resumes at the next instruction; a C
+** function interrupted in the middle of its work has nowhere to resume,
+** and a yield would end it there as if it had returned. A raised error
+** restores 'nCcalls' as it unwinds ('luaD_rawrunprotected').
+*/
+LUA_API void lua_checkhook (lua_State *L) {
+  if (l_unlikely(L->hookmask & LUA_MASKCOUNT)) {
+    lua_lock(L);
+    incnny(L);
+    luaD_hook(L, LUA_HOOKCOUNT, -1, 0, 0);
+    decnny(L);
+    lua_unlock(L);
+  }
 }
 
 

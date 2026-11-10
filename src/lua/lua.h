@@ -465,12 +465,24 @@ LUA_API void *(lua_upvalueid) (lua_State *L, int fidx, int n);
 LUA_API void  (lua_upvaluejoin) (lua_State *L, int fidx1, int n1,
                                                int fidx2, int n2);
 
+/*
+** A C function that may run for a long time calls 'lua_checkhook' now and
+** then, so that a count hook (e.g. one enforcing an execution time limit)
+** is not starved until the function returns. It delivers a LUA_HOOKCOUNT
+** event at once if a count hook is set, whatever the hook's count. The
+** hook may raise an error, which leaves the C function, but cannot yield:
+** 'lua_isyieldable' is false while it runs.
+*/
+LUA_API void (lua_checkhook) (lua_State *L);
+
 LUA_API void (lua_sethook) (lua_State *L, lua_Hook func, int mask, int count);
 LUA_API lua_Hook (lua_gethook) (lua_State *L);
 LUA_API int (lua_gethookmask) (lua_State *L);
 LUA_API int (lua_gethookcount) (lua_State *L);
 
 LUA_API int (lua_setcstacklimit) (lua_State *L, unsigned int limit);
+LUA_API void (lua_checkcstack) (lua_State *L);
+LUA_API const void *(lua_cstackfloor) (lua_State *L);
 
 struct lua_Debug {
   int event;

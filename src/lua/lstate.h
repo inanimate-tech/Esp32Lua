@@ -113,6 +113,19 @@ typedef struct CallInfo CallInfo;
 /* Decrement the number of non-yieldable calls */
 #define decnny(L)	((L)->nCcalls -= 0x10000)
 
+/*
+** True when the C stack may be nearly full (see LUAI_CSTACKRESERVE): the
+** running code is below the floor 'luaE_setcstackfloor' last cached. Only
+** a hint; 'luaE_checkcstackleft' and 'luaE_cstackfull' measure again
+** before anything is raised or refused.
+*/
+#define luaE_cstackshort(L)	luaE_belowfloor(G(L)->cstackfloor)
+
+l_sinline int luaE_belowfloor (const char *floor) {
+  char here;
+  return (L_P2I)&here < (L_P2I)floor;
+}
+
 /* Non-yieldable call increment */
 #define nyci	(0x10000 | 1)
 
@@ -300,6 +313,7 @@ typedef struct global_State {
   TString *strcache[STRCACHE_N][STRCACHE_M];  /* cache for strings in API */
   lua_WarnFunction warnf;  /* warning function */
   void *ud_warn;         /* auxiliary data to 'warnf' */
+  const char *cstackfloor;  /* C stack below this is short (or NULL) */
 } global_State;
 
 
@@ -399,6 +413,10 @@ LUAI_FUNC CallInfo *luaE_extendCI (lua_State *L);
 LUAI_FUNC void luaE_shrinkCI (lua_State *L);
 LUAI_FUNC void luaE_checkcstack (lua_State *L);
 LUAI_FUNC void luaE_incCstack (lua_State *L);
+LUAI_FUNC size_t luaE_cstackleft (lua_State *L);
+LUAI_FUNC void luaE_checkcstackleft (lua_State *L);
+LUAI_FUNC int luaE_cstackfull (lua_State *L);
+LUAI_FUNC void luaE_setcstackfloor (lua_State *L);
 LUAI_FUNC void luaE_warning (lua_State *L, const char *msg, int tocont);
 LUAI_FUNC void luaE_warnerror (lua_State *L, const char *where);
 LUAI_FUNC int luaE_resetthread (lua_State *L, int status);

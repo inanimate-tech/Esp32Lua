@@ -28,6 +28,35 @@
 #include "ltm.h"
 
 
+/*
+** Default 'luai_cstacklimit' (see LUAI_CSTACKRESERVE in llimits.h). On
+** ESP-IDF it is the lowest address of the running FreeRTOS task's stack;
+** before the scheduler starts (static constructors, say) there is no
+** running task and no limit is known. Elsewhere no limit is known.
+*/
+#if !defined(luai_cstacklimit)
+
+#if defined(ESP_PLATFORM)
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+static const char *l_taskstacklimit (void) {
+  TaskHandle_t task = xTaskGetCurrentTaskHandle();
+  return (task == NULL) ? NULL : (const char *)pxTaskGetStackStart(task);
+}
+
+#define luai_cstacklimit(L)	l_taskstacklimit()
+
+#else
+
+#define luai_cstacklimit(L)	NULL
+
+#endif
+
+#endif
+
+
 
 /*
 ** thread state + extra space
@@ -170,10 +199,108 @@ void luaE_checkcstack (lua_State *L) {
 }
 
 
+/*
+** Bytes of C stack left above 'luai_cstacklimit', measured at a local
+** of this function, or MAX_SIZE when the limit is not known (or the
+** running code is not on the stack it describes).
+*/
+size_t luaE_cstackleft (lua_State *L) {
+  const char *limit = luai_cstacklimit(L);
+  char here;
+  UNUSED(L);
+  if (limit == NULL || (L_P2I)&here < (L_P2I)limit)
+    return MAX_SIZE;
+  return cast_sizet((L_P2I)&here - (L_P2I)limit);
+}
+
+
+/*
+** Called wherever the count of C calls is checked (see LUAI_CSTACKRESERVE
+** in llimits.h). Running short of C stack is treated as reaching
+** LUAI_MAXCCALLS: the count is raised to the limit, so that the error is
+** raised, and its handler then runs, exactly as for the count. The raised
+** count is undone when the error unwinds ('luaD_rawrunprotected' restores
+** 'nCcalls').
+*/
+void luaE_checkcstackleft (lua_State *L) {
+  size_t left;
+  luaE_setcstackfloor(L);  /* the cached floor may be another stack's */
+  left = luaE_cstackleft(L);
+  if (l_likely(left >= LUAI_CSTACKRESERVE + LUAI_CSTACKERRSPACE))
+    return;  /* the usual case */
+  if (left < LUAI_CSTACKRESERVE)
+    luaD_throw(L, LUA_ERRERR);  /* too little left to handle an error */
+  if (getCcalls(L) < LUAI_MAXCCALLS) {  /* not handling an overflow yet? */
+    L->nCcalls += LUAI_MAXCCALLS - getCcalls(L);
+    luaE_checkcstack(L);  /* raises "C stack overflow" */
+  }
+}
+
+
+/*
+** True when too little C stack is left to enter Lua, measured afresh
+** (for a caller that refuses instead of raising an error).
+*/
+int luaE_cstackfull (lua_State *L) {
+  luaE_setcstackfloor(L);  /* the cached floor may be another stack's */
+  return luaE_cstackleft(L) < LUAI_CSTACKRESERVE + LUAI_CSTACKERRSPACE;
+}
+
+
+/*
+** Cache the floor of the C stack the running code is on: the address
+** below which fewer than LUAI_CSTACKRESERVE + LUAI_CSTACKERRSPACE bytes
+** are left. Finding the stack can cost more than the call it guards (two
+** calls into the RTOS on ESP-IDF), so the places that count C calls only
+** compare against this, and it is refreshed where C code enters Lua from
+** outside it (a task, say, may enter on a stack of its own), which is
+** where the count of C calls leaves zero: in 'ccall', which every call
+** from C goes through (lua_callk and lua_pcallk, and the metamethods and
+** finalizers that other API functions run), in lua_load and in
+** lua_resume. A floor left by another stack never raises or refuses
+** anything by itself, since 'luaE_checkcstackleft' and 'luaE_cstackfull'
+** refresh it first; at worst a check is missed, where the running code
+** changes stacks without leaving Lua.
+*/
+void luaE_setcstackfloor (lua_State *L) {
+  const char *limit = luai_cstacklimit(L);
+  G(L)->cstackfloor = (limit == NULL) ? NULL
+                      : limit + LUAI_CSTACKRESERVE + LUAI_CSTACKERRSPACE;
+}
+
+
 LUAI_FUNC void luaE_incCstack (lua_State *L) {
   L->nCcalls++;
   if (l_unlikely(getCcalls(L) >= LUAI_MAXCCALLS))
     luaE_checkcstack(L);
+  if (l_unlikely(luaE_cstackshort(L)))
+    luaE_checkcstackleft(L);
+}
+
+
+/*
+** For C code that recurses on its own, without calling back into Lua (a
+** pattern matcher, a serializer): raises "C stack overflow" where the core
+** would, so that such recursion is bounded by the same C-stack limit.
+*/
+LUA_API void lua_checkcstack (lua_State *L) {
+  lua_lock(L);
+  luaE_checkcstackleft(L);
+  lua_unlock(L);
+}
+
+
+/*
+** The C-stack address below which 'lua_checkcstack' should be called, or
+** NULL when no limit is known: the floor cached when C code last entered
+** Lua (see 'luaE_setcstackfloor'). A C function that recurses many times
+** reads it once each time it is called and compares the address of a
+** local against it, calling
+** 'lua_checkcstack' (which measures afresh) only below it, instead of
+** paying for the full check at every level.
+*/
+LUA_API const void *lua_cstackfloor (lua_State *L) {
+  return G(L)->cstackfloor;
 }
 
 
@@ -396,6 +523,7 @@ LUA_API lua_State *lua_newstate (lua_Alloc f, void *ud) {
   g->twups = NULL;
   g->totalbytes = sizeof(LG);
   g->GCdebt = 0;
+  g->cstackfloor = NULL;
   g->lastatomic = 0;
   setivalue(&g->nilvalue, 0);  /* to signal that state is not yet built */
   setgcparam(g->gcpause, LUAI_GCPAUSE);

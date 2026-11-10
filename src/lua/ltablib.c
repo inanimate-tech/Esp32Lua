@@ -58,6 +58,21 @@ static void checktab (lua_State *L, int arg, int what) {
 }
 
 
+/*
+** Moving elements runs no Lua code when the table has no metamethods,
+** and moving nils uses no memory, so a script chooses how long 'insert',
+** 'remove' and 'move' run (through '__len', or the range it gives
+** 'move'). They call the count hook every MOVEHOOKSTEPS elements.
+*/
+#if !defined(MOVEHOOKSTEPS)
+#define MOVEHOOKSTEPS	4096
+#endif
+
+#define checkhookat(L,i) \
+  { if (l_unlikely((lua_Unsigned)(i) % MOVEHOOKSTEPS == 0)) \
+      lua_checkhook(L); }
+
+
 static int tinsert (lua_State *L) {
   lua_Integer pos;  /* where to insert new element */
   lua_Integer e = aux_getn(L, 1, TAB_RW);
@@ -74,6 +89,7 @@ static int tinsert (lua_State *L) {
       luaL_argcheck(L, (lua_Unsigned)pos - 1u < (lua_Unsigned)e, 2,
                        "position out of bounds");
       for (i = e; i > pos; i--) {  /* move up elements */
+        checkhookat(L, i);
         lua_geti(L, 1, i - 1);
         lua_seti(L, 1, i);  /* t[i] = t[i - 1] */
       }
@@ -97,6 +113,7 @@ static int tremove (lua_State *L) {
                      "position out of bounds");
   lua_geti(L, 1, pos);  /* result = t[pos] */
   for ( ; pos < size; pos++) {
+    checkhookat(L, pos);
     lua_geti(L, 1, pos + 1);
     lua_seti(L, 1, pos);  /* t[pos] = t[pos + 1] */
   }
@@ -128,12 +145,14 @@ static int tmove (lua_State *L) {
                   "destination wrap around");
     if (t > e || t <= f || (tt != 1 && !lua_compare(L, 1, tt, LUA_OPEQ))) {
       for (i = 0; i < n; i++) {
+        checkhookat(L, i);
         lua_geti(L, 1, f + i);
         lua_seti(L, tt, t + i);
       }
     }
     else {
       for (i = n - 1; i >= 0; i--) {
+        checkhookat(L, i);
         lua_geti(L, 1, f + i);
         lua_seti(L, tt, t + i);
       }
@@ -380,6 +399,7 @@ static void auxsort (lua_State *L, IdxT lo, IdxT up,
     set2(L, p, up - 1);  /* swap Pivot (a[p]) with a[up - 1] */
     p = partition(L, lo, up);
     /* a[lo .. p - 1] <= a[p] == P <= a[p + 1 .. up] */
+    lua_checkhook(L);  /* let a count hook interrupt a long sort */
     if (p - lo < up - p) {  /* lower interval is smaller? */
       auxsort(L, lo, p - 1, rnd);  /* call recursively for lower interval */
       n = p - lo;  /* size of smaller interval */

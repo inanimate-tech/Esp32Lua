@@ -627,10 +627,14 @@ CallInfo *luaD_precall (lua_State *L, StkId func, int nresults) {
 */
 l_sinline void ccall (lua_State *L, StkId func, int nResults, l_uint32 inc) {
   CallInfo *ci;
+  if (getCcalls(L) == 0)  /* entering Lua from outside it? */
+    luaE_setcstackfloor(L);
   L->nCcalls += inc;
-  if (l_unlikely(getCcalls(L) >= LUAI_MAXCCALLS)) {
+  if (l_unlikely(getCcalls(L) >= LUAI_MAXCCALLS || luaE_cstackshort(L))) {
     checkstackp(L, 0, func);  /* free any use of EXTRA_STACK */
-    luaE_checkcstack(L);
+    if (getCcalls(L) >= LUAI_MAXCCALLS)
+      luaE_checkcstack(L);
+    luaE_checkcstackleft(L);
   }
   if ((ci = luaD_precall(L, func, nResults)) != NULL) {  /* Lua function? */
     ci->callstatus = CIST_FRESH;  /* mark that it is a "fresh" execute */
@@ -845,7 +849,10 @@ LUA_API int lua_resume (lua_State *L, lua_State *from, int nargs,
   else if (L->status != LUA_YIELD)  /* ended with errors? */
     return resume_error(L, "cannot resume dead coroutine", nargs);
   L->nCcalls = (from) ? getCcalls(from) : 0;
-  if (getCcalls(L) >= LUAI_MAXCCALLS)
+  if (getCcalls(L) == 0)  /* resumed from outside Lua? */
+    luaE_setcstackfloor(L);
+  if (getCcalls(L) >= LUAI_MAXCCALLS ||
+      (luaE_cstackshort(L) && luaE_cstackfull(L)))
     return resume_error(L, "C stack overflow", nargs);
   L->nCcalls++;
   luai_userstateresume(L, nargs);
