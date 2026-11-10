@@ -123,6 +123,20 @@ int main (void) {
       " table.sort(t)"
       " for i = 2, #t do assert(t[i - 1] <= t[i]) end");
 
+  /* Moving nils runs no Lua code and uses no memory, over a range the
+     script chooses ('tmove') or a length '__len' reports ('tinsert',
+     'tremove'). */
+  expect_delivery(L, "table.move, an empty range",
+      "table.move({}, 1, 1000000, 1, {})");
+  expect_delivery(L, "table.move, an empty range moved up",
+      "table.move({}, 1, 1000000, 2)");
+  expect_delivery(L, "table.insert, a long empty table",
+      "local t = setmetatable({}, {__len = function () return 1000000 end})"
+      " table.insert(t, 1, 0)");
+  expect_delivery(L, "table.remove, a long empty table",
+      "local t = setmetatable({}, {__len = function () return 1000000 end})"
+      " table.remove(t, 1)");
+
   /* A hook that raises ends the call with its error, cleanly. */
   {
     clock_t start = clock();
